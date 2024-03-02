@@ -1,0 +1,483 @@
+---
+title: "EDA"
+author: "Justyna Sarkowicz"
+date: "2023-12-02"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float: 
+      collapsed: true
+      smooth_scroll: true
+    toc_font: "Arial"
+    df_print: paged
+---
+```{r, include = FALSE}
+options(repos = c(CRAN = "https://cloud.r-project.org")) 
+```
+```{r include=FALSE, message=FALSE}
+install.packages("dplyr")
+install.packages("ggplot2")
+install.packages("tidyr")
+install.packages("mice")
+install.packages("psych")
+install.packages("corrplot")
+```
+
+# Wprowadzenie
+Zbiór danych składający się z 350 wpisów z 11 atrybutami. Przedstawia zachowania klientów w pewnej firmie e-commerce.
+
+# Zmienne
+* **Customer.ID**: Unikalny identyfikator przypisany każdemu klientowi, zapewniający rozróżnienie w zbiorze danych.
+* **Gender** Płeć klienta.
+* **Age** Wiek klienta.
+* **City** Wskazuje miasto zamieszkania każdego klienta, dostarczając informacji geograficznych.
+* **Membership.Type** Identyfikuje rodzaj członkostwa posiadanego przez klienta, wpływając na korzyści.
+* **Total.Spend** Rejestruje całkowite wydatki pieniężne klienta na platformie e-commerce.
+* **Item.Purchased** Określa całkowitą liczbę artykułów zakupionych przez klienta.
+* **Average.Rating** Reprezentuje średnią ocenę wystawioną przez klienta zakupionym produktom i służy do pomiaru zadowolenia. Od 0 do 5. 
+* **Discount.Applied** (Płeć): mężczyzna i kobieta.
+* **Days.Since.Last.Purchase** Odzwierciedla liczbę dni, które upłynęły od ostatniego zakupu klienta
+* **Satisfaction.Level** Rejestruje ogólny poziom zadowolenia klienta, zapewniając subiektywną miarę jego doświadczenia.
+
+# Pakiety, z których będę korzystać
+```{r warning=FALSE, message=FALSE}
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(mice)
+library(psych)
+library(corrplot)
+```
+
+Wczytanie pliku:
+```{r}
+ecommerce <- read.csv("C:/Users/Justyna/Desktop/ProjektAD/E-commerce_data.csv", sep=",")
+```
+
+# Zapoznanie się ze strukturą pliku
+Sprawdzam kilka wartości `head()`, `tail()`:
+```{r}
+head(ecommerce)
+```
+```{r}
+tail(ecommerce)
+```
+Jak widać kolumna `Customer.ID` jest nam tutaj niepotrzebna, ponieważ nie będziemy z niej korzystać w naszej analizie, dlatego ją usuwamy.
+```{r}
+ecommerce <- ecommerce[,-1]
+```
+Sprawdzenie struktury pliku: `str()`
+```{r}
+str(ecommerce)
+```
+Powyżej widać, że znajdują się tutaj zmienne tekstowe `Gender`, `City`, które powinny zostać przekształcone w faktory, ponieważ są to zmienne jakościowe. 
+
+```{r}
+ecommerce$Gender <- as.factor(ecommerce$Gender)
+ecommerce$City <- as.factor(ecommerce$City)
+```
+Zastanówmy się jeszcze nad zmienną `Membership.Type`.
+```{r}
+table(ecommerce$Membership.Type)
+```
+Jest to rodzaj członkostwa, który nam daje benefity w zależności od jego rodzaju - `Bronze` najniższy poziom członkostwa, `Gold` najwyższy. Zatem jest to zmienna kategoryczna. Zmieniam ją i nadaję kolejność posczególnym kategoriom.
+```{r}
+ecommerce$Membership.Type <- factor(ecommerce$Membership.Type)
+levels(ecommerce$Membership.Type) <- c("Bronze", "Silver", "Gold")
+table(ecommerce$Membership.Type)
+```
+Zmienna `Satisfaction.Level` jest zmienną porządkową. Jest to ogólny poziom zadowolenia z usługi. Zmieniamy ją więc i musimy również nadać kolejność poszczególnym klasom.
+```{r}
+ecommerce$Satisfaction.Level <- factor(ecommerce$Satisfaction.Level, levels = c("Unsatisfied", "Neutral", "Satisfied"))
+table(ecommerce$Satisfaction.Level)
+```
+Zmieńmy także zmienną `Discount.Applied`, która przyjmuje wartości `TRUE` - gdy klient otrzymał rabat, `FALSE` - gdy nie dostał, w celu ułatwienia dalszej analizy.
+```{r}
+table(ecommerce$Discount.Applied)
+```
+```{r}
+ecommerce$Discount.Applied <- as.factor(ecommerce$Discount.Applied)
+levels(ecommerce$Discount.Applied) <- c("0", "1")
+table(ecommerce$Discount.Applied)
+```
+Teraz widzimy, że 1 oznacza otrzymanie rabatu, a 0 jego brak.
+```{r}
+summary(ecommerce)
+```
+```{r}
+ecommerce %>%
+  select(Age, Total.Spend, Items.Purchased, Average.Rating, Days.Since.Last.Purchase) %>%
+  describe()
+```
+Możemy wstępnie zauważyć wartości odstające, w `Satisfaction.Level`. Jednak sprawdźmy to jeszcze za pomocą funkcji `md.pattern()` z pakietu `mice.`
+```{r}
+md.pattern(ecommerce)
+```
+Są to braki w zmiennej pokazujące zadowolenie klientów. Jest ich niewiele, bo tylko 2, dlatego możemy je usunąć. Nie niesie to ryzyka utraty danych.
+```{r}
+sum(is.na(ecommerce$Satisfaction.Level))
+```
+```{r}
+ecommerce <- ecommerce[complete.cases(ecommerce$Satisfaction.Level), ]
+sum(is.na(ecommerce$Satisfaction.Level))
+```
+## Oglądam rozkłady zmiennych ilościowych:
+* zmienna 'Age'
+```{r}
+ecommerce %>%
+  ggplot() +
+  geom_histogram(aes(x = Age),
+                 binwidth = 1,
+               color = "darkgreen", 
+               fill = "lightgreen") +
+  theme_light() +
+  labs(title= "Histogram wieku", x = "Wiek", y = "Liczba klientów")
+```
+```{r}
+summary(ecommerce$Age)
+```
+Widzimy, że rozkład wieku jest dosyć nierównomierny. Przedział wiekowy jest od 26 do 43 lat. Brakuje nam osób w wieku 39, 40 lat. Zaś najwięcej osób jest w wieku 30 lat.
+
+* zmienna `Total.Spend`:
+```{r}
+ecommerce %>%
+  ggplot() +
+  geom_density(aes(x = Total.Spend),
+               color = "darkgreen", 
+               fill = "lightgreen") +
+  theme_light() +
+  labs(title= "Histogram całkowitych wydatków klientów", x = "Całkowite wydatki", y = "Odsetek klientów")
+```
+
+Widzimy, że najczęściej klienci wydają między 400, a 800 zł.
+
+* zmienna `Items.Purchased`:
+```{r}
+ecommerce %>%
+  ggplot() +
+  geom_histogram(aes(x = Items.Purchased),
+                 binwidth = 1,
+               color = "darkgreen", 
+               fill = "lightgreen") +
+  theme_light() +
+  labs(title= "Histogram liczby kupionych produktów", x = "Liczba kupionych produktów", y = "Liczba klientów")
+```
+```{r}
+summary(ecommerce$Items.Purchased)
+```
+Widzimy, że klienci najczęściej kupują 10 produktów. Jednak liczba osób kupujących od 7 do 13 produktów jest na podobnym poziomie. Najrzadziej klienci kupują 17-19 produktów.
+
+*zmienna `Average.Rating`
+```{r}
+ecommerce %>%
+  ggplot() +
+  geom_density(aes(x = Average.Rating),
+               color = "darkgreen", 
+               fill = "lightgreen") +
+  theme_light() +
+  labs(title= "Wykres gęstości średnich ocen klientów", x = "Średnie oceny", y = "Odsetek")
+```
+
+Widzimy, że przeważają średnie oceny powyżej 4.0. Jednak niższych ocen jest również dużo.
+```{r}
+summary(ecommerce$Average.Rating)
+```
+Możemy zobaczyć, że 25% klientów średnio oceniło otrzymane produkty powyżej 4.5. Świadczy to dobrze o firmie.
+
+* zmienna `Days.Since.Last.Purchase`
+```{r}
+summary(ecommerce$Days.Since.Last.Purchase)
+```
+```{r}
+ecommerce %>%
+  ggplot() +
+  geom_density(aes(x = Days.Since.Last.Purchase),
+               color = "darkgreen", 
+               fill = "lightgreen") +
+  theme_light() +
+  labs(title= "Wykres gęstości liczby dni od ostatniego zakupu", x = "Liczba dni od ostatniego zakupu", y = "Odsetek")
+```
+
+Możemy zobaczyć, że rozkład jest prawostronnie skośny. 50% klientów dokonuje ponownie zakupu do 23 dni, czyli większość klientów dość często decyduje się na ponowny zakup.
+
+## Oglądam rozkłady zmiennych jakościowych
+* zmienna `Gender`
+```{r}
+table(ecommerce$Gender)
+```
+Mamy prawie tyle samo klientów o płci męskiej i żeńskiej.
+
+* zmienna `City`
+```{r}
+table(ecommerce$City)
+```
+```{r}
+ecommerce %>%
+  ggplot() +
+  geom_bar(aes(x = City),
+               color = "darkblue", 
+               fill = "lightblue") +
+  theme_light() +
+  labs(title= "Wykres lokalizacji, w których mieszkają klienci", x = "Miasto", y = "Liczba klientów")
+```
+
+Rozkład jest dość równomierny. Nie ma znacznych różnić w ilości klientów z danego miasta.
+
+* zmienna `Membership.Type:`
+```{r}
+table(ecommerce$Membership.Type)
+```
+
+```{r}
+ecommerce %>%
+  ggplot() +
+  geom_bar(aes(x = Membership.Type),
+               color = "darkblue", 
+               fill = "lightblue") +
+  theme_light() +
+  labs(title= "Wykres rodzajów członkostwa", x = "Rodzaj członkostwa", y = "Liczba klientów")
+```
+
+W każdym rodzaju członkostwa mamy podobną liczbę klientów.
+
+* zmienna `Discount Applied`
+```{r}
+table(ecommerce$Discount.Applied)
+```
+Mamy także praktycznie taką samą ilość otrzymanych zniżek.
+```{r}
+ecommerce %>%
+  ggplot() +
+  geom_bar(aes(x = Discount.Applied),
+               color = "darkblue", 
+               fill = "lightblue") +
+  theme_light() +
+  labs(title= "Wykres posiadania rabatu", x = "Posiadany rabta", y = "Liczba klientów", caption = "1 - rabat, 0 - brak")
+  
+```
+
+
+* zmienna `Satisfaction.Level`
+```{r}
+table(ecommerce$Satisfaction.Level)
+```
+
+```{r}
+ecommerce %>%
+  ggplot() +
+  geom_bar(aes(x = Satisfaction.Level),
+               color = "darkblue", 
+               fill = "lightblue") +
+  theme_light() +
+  labs(title= "Wykres poziomu satysfakcji", x = "Poziom satysfakcji", y = "Liczba klientów")
+```
+
+Widzimy tutaj, że przeważają zadowoleni klenci. Ich liczba przekracza 120. Jednak mamy sporą liczbę osób, które są niezadowolone.
+
+Zobaczmy jeszcze jak zmienne ilościowe są skorelowane:
+```{r}
+cor = cor(ecommerce[, c("Total.Spend", "Items.Purchased", "Age", "Average.Rating", "Days.Since.Last.Purchase")],
+          method = "spearman")
+corrplot(cor, method = "color", type = "upper", tl.col = "black", tl.srt = 45)
+```
+
+Mam silnie zależną liczbę posiadanych produktów od wydatków, co jest dość logiczne, że skoro kupił dużo produktów to suma jego wydatków z każdym kolejnym produktem się zwiększa. Od tych dwóch zmiennych silnie zależy także średnia ocena zakupionych produktów.
+
+# Pytania badawcze
+## 1. Sprawdźmy do jakiej grupy klientów trafia firma? 
+O jakiej strukturze wieku i płci, z jakiego miasta.
+```{r}
+ggplot(ecommerce, aes(x = Age, fill = Gender)) +
+  geom_histogram(position = "dodge", bins = 20, color = "black", alpha = 0.7) +
+  facet_wrap(~City, scales = "free") +
+  labs(title = "Histogram wieku w podziale na płeć i miasto", x = "Wiek", y = "Liczba obserwacji") +
+  theme_light()
+```
+
+Istnieje tutaj zróżnicowanie demograficzne miast, co można zauważyć po różnicach w strukturze wiekowej i płciowej.
+Widzimy tutaj, że z miast Chicago, Houston i New York kupują głównie kobiety w wieku 29-43 lat.
+Mężczyźni zaś są głównie z miast Los Angeles, Miami, San Francisco i ich przedział wiekowy to od 26-36 lat. 
+Na podstawie tych danych, firma może rozważyć skoncentrowanie działań marketingowych skierowanych do danej grupy wiekowej i płciowej w zależności od specyfiki poszczególnych miast. Można także dostosować specyfikę produktów, ofert promocyjnych itp., aby lepiej odpowiadały charakterystyce danej grupy docelowej w konkretnym obszarze.
+
+## 2.Sprawdźmy więc, z jakich miast klienci najwięcej wydają.
+```{r}
+ecommerce %>%
+  group_by(City) %>%
+  summarise(liczba = n(),
+            średnia = mean(Total.Spend),
+            mediana = median(Total.Spend),
+            odchyl_stand = sd(Total.Spend)) %>%
+  arrange(średnia)
+```
+W każdej grupie rozkład jest skoncentrowany wokół średniej - odchylenia są niewielkie. Możemy stwierdzić, że zdecydowanie najwięcej wydają klienci z miast San Francisco i New York, a najmniej z Houston i Chicago.  Różnice te mogą wynikać z różnic w poziomie życia, czy dochodach. Zważywszy na to, że klienci z San Francisco i New York wydają znacznie więcej, firmy mogą skoncentrować się na tych obszarach oraz ich demografii w celu przyciągnięcia większej liczby klientów. 
+
+Zobrazujmy to jeszcze za pomocą boxplotów:
+```{r}
+ecommerce %>%
+  ggplot() +
+  geom_boxplot(aes(x = City, y = Total.Spend)) +
+  labs(title = "Wykres pudełkowy wydatków w różnych miastach", x = "Miasto", y = "Wydatki") +
+  theme_minimal()
+```
+
+Widzimy, że nasze wcześniejsze wnioski się potwierdzają.
+
+## 3. Sprawdźmy, więc jakie klienci w danym mieście członkostwa posiadają: 
+```{r}
+custom_colors <- c("Gold" = "#FFD700", "Silver" = "#C0C0C0", "Bronze" = "#CD7F32")
+
+ecommerce %>%
+  ggplot() +
+  geom_bar(aes(x = City,  fill = Membership.Type), color = "black") +
+  labs(title = "Wykres rodzajów członkostwa w danym mieście", x = "Miasto", y = "Liczba osób", fill = "Rodzaj członkostwa") +
+  scale_fill_manual(values = custom_colors) +
+  theme_minimal()
+```
+
+Widzimy zatem zdecydowany podział rodzajów członkostwa ze względu na miasto. Członkostwo `Silver` posiadają osoby z miast San francisco, New York i były to także miasta, w których klienci najwięcej wydali. Pokazuje nam to nieoczekiwany wynik, bo członkostwo `Gold` posiada najwięcej benefitów, więc wydawać by się mogło, że osoby właśnie z tym członkostwem będą z miast, w których wydano najwięcej. Zaś osoby z miast Chicago i Houston, posiadają oni członkostwo `Bronze` i w tych miastach klienci najmniej wydali. Czego się można było spodziewać, ze względu na to, że status `Bronze` daje najmniej korzyści.
+
+## 4. Zobaczmy zatem, czy na to, że osoby z członkostwem `Silver`, którzy więcej wydali, wpłynęło posiadanie rabatu:
+```{r}
+ggplot(ecommerce, aes(x = Membership.Type, y = Total.Spend, fill = Discount.Applied)) +
+  geom_boxplot() +
+  labs(title = "Wykres pudełkowy wydatków w zależności od członkostwa i rabatu",
+       x = "Rodzaj członkostwa", y = "Wydatki", fill = "Rabat") +
+  theme_minimal()
+```
+
+Przy analizie zmiennej `Membership.Type` widzieliśmy, że liczby osób posiadających dane członkostwo niewiele się różniły. Widzimy tutaj ponownie widoczne różńice w rozkładzie wydatków w zależności od członkostwa. Najmniej wydają klienci z najniższym poziomem członkostwa `Bronze`, mniej niż 600 zł. 
+W tej grupie najbardziej wpłynęła zniżka na wysokość wydatków.
+
+Zobaczmy jeszcze statystyki opisowe:
+```{r, message=FALSE}
+ecommerce %>%
+  group_by(Membership.Type, Discount.Applied) %>%
+  summarise(liczba = n(),
+            średnia = mean(Total.Spend),
+            mediana = median(Total.Spend),
+            odchyl_stand = sd(Total.Spend)) %>%
+  arrange(średnia)
+```
+Klienci o statusie `Silver` i `Gold` wydali więcej, pomimo braku zniżki, widać to na podstawie ich średnich wydatków i tego, że odchylenia są niewielkie. Jednak w `Silver` jest większa różnica pomiędzy wydatkami bez rabatu i wraz z nim, niż w `Gold`. Posiadanie rabatu nie wpłynęło, więc bardzo na wielkość wydatków klientów z tej grupy.
+Może, więc być tak, że program lojalnościowy związany z członkostwem `Silver` oferuje atrakcyjniejsze korzyści, które skłaniają ich do wyższych wydatków niż członkostwo `Gold`. Na taki rozkład wydatków zapewne wpływa też cena członkostwa, która może być niższa dla `Silver`, co sprawia, że skoro klienci mniej wydają na członkostwo, mogą sobie pozowlić na większe wydatki. 
+
+## 5.Idąc dalej, zobaczmy jak wygląda poziom satysfakcji, ze względu na rodzaj członkostwa.
+```{r}
+custom_colors <- c("Gold" = "#FFD700", "Silver" = "#C0C0C0", "Bronze" = "#CD7F32")
+
+ecommerce %>%
+  ggplot() +
+  geom_bar(aes(x = Satisfaction.Level, fill = Membership.Type),
+           position = "fill",
+           color = "black") +
+  labs(title = "Satysfakcja klientów w zależności od członkostwa",
+       x = "Satysfakcja", y = "Odsetek klientów", fill = "Rodzaj członkostwa") +
+  scale_fill_manual(values = custom_colors) +
+  theme_minimal()
+```
+
+Widzimy, więc że najbardziej usatysfakcjonowani są klienci posiadający członkostwo `Silver`.Tylko niewielka ilość członków `Gold` jest usatysfakcjonowana. Natomiast żadna z osób posiadających członkostwo `Bronze` nie jest zadowolona. Podobnie oceniają usługi klienci z członkostwem `Silver` i `Gold`, odestki osób nieusatysfakcjonowanych z usług oraz neutralnych jest podobny. 
+Te informacje prowadzą do wniosków, że członkostwo `Gold` pomimo większych korzyści, może nie spełniać oczekiwań jej posiadaczy. Jest to rodzaj członkostwa, który powinien dawać najwięcej benefitów, więc poziom satysfakcji wśród tej grupy powinien być zdecydowanie poprawiony. 
+Zaś brak zadowolenia wśród posiadaczy członkostwa `Bronze` może wskazywać na ograniczone korzyści związane z tym rodzajem członkostwa.
+
+### Zobaczmy jeszcze, która płeć wybiera jaki rodzaj członkostwa:
+```{r}
+ecommerce %>%
+  ggplot() +
+  geom_bar(aes(x = Membership.Type, fill = Gender),
+          color = "black",
+          position = "fill") +
+  theme_light() +
+  labs(title= "Wykres rodzaju członkostwa od płci", x = "Rodzaj członkostwa", y = "Odsetek klientów", fill = "Płeć")
+```
+
+Widzimy zatem, że członkowie posiadający status `Bronze` to tylko kobiety, zaś status `Gold` posiadają praktycznie sami mężczyźni. Aby, więc zwiększyć poziom zadowolenia w tych dwóch grupach, można by dostosować korzyści do danej płci. Status `Silver` jest równomiernie podzielony na kobiety i mężczyzn. Jednak benefity, które daje, przemawiają do obu płci, o czym świadczy to, że ta grupa jest zawsze usatysfakcjonowana.
+
+## 6. Sprawdźmy jak wygląda czas od ostatniego zamówienia w zależności od członkostwa
+```{r}
+custom_colors <- c("Gold" = "#FFD700", "Silver" = "#C0C0C0", "Bronze" = "#CD7F32")
+
+ecommerce %>%
+  ggplot() +
+  geom_density(aes(x = Days.Since.Last.Purchase, fill = Membership.Type), alpha = 0.5) +
+  labs(title = "Gęstość czasu od ostatniego zamówienia w zależności od rodz. członkostwa", x = "Czas od ostatniego zamówienia", fill = "Rodzaj członkostwa") +
+  scale_fill_manual(values = custom_colors) +
+  theme_minimal()
+```
+
+Najszybciej kolejnego zamówienia dokonują osoby, które posiadają członkostwo `Silver`. Praktycznie nikt z tej grupy nie dokonuje później zamówienia niż 40 dni. Co może być wynikiem tego, że ta grupa należała do usatysfakcjonowanych klientów z usług, więc szybciej dokonywała kolejnych zamówień. Również część klientów posiadająca status `Gold` dokonuje dość szybko kolejnego zamówienia, poniżej 20 dni, jest to zapewne ta niewielka część osób, która była usatysfacjonowana z usług. Jednak później czas od ostatniego zamówienia jest dość równomiernie rozłożony. W tej grupie też jest największy odsetek osób, których czas od ostatniego zamówienia przekroczył 50 dni.
+Widać, że rozkład czasu od ostatniego zamówienia wśród członków `Bronze` ma rozkład dwumodalny. Mamy tutaj rozbieżność, bo klienci z tej grupy najczęściej zamawiali między 20-25 dniami albo 35-45 dniami.
+
+## 7.Zobaczmy zatem jakie są średnie oceny produktów w zależności od poziomu zadowolenia z usługi:
+```{r}
+ecommerce %>%
+  group_by(Satisfaction.Level) %>%
+  summarise(liczba = n(),
+            średnia = mean(Average.Rating),
+            mediana = median(Average.Rating),
+            odchyl_stand = sd(Average.Rating)) %>%
+  arrange(średnia)
+```
+Najwyższe średnie oceny mają osoby, które były usatysfakcjonowane z usługi, ich oceny są skoncentrowane wokół średniej, o czym świadczy niewielkie odchylenie standardowe. Wskazuje to na ogólne zadowolenie z usługi i zamówionych produktów. Natomiast oceny osób z grupy `Neutral` i `Unsatisfied` są do siebie zbliżone. Aczkolwiek rozkład osób z grupy `Neutral` jest bardziej rozproszony, czyli większy wpływ na ocenę miał tutaj otrzymany produkt niż samo zadowolenie z usług.
+
+## 8. Sprawdźmy czy na średnią ocenę oprócz otrzymanego produktu mogło coś wpłynąć
+Zobaczmy zatem jak to wygląda jej zależność z wielkością wydatków i rodzajem członkostwa:
+```{r}
+custom_colors <- c("Gold" = "#FFD700", "Silver" = "#C0C0C0", "Bronze" = "#CD7F32")
+
+ggplot(ecommerce, aes(x = Total.Spend, y = Average.Rating, color = Membership.Type)) +
+  geom_point(size = 5, alpha = 0.5) +
+  labs(title = "Zależność między oceną a wydatkami w zależności od rodzaju członkostwa",
+       x = "Wydatki",
+       y = "Średnia ocena",
+       color = "Rodzaj członkostwa") +
+  scale_color_manual(values = custom_colors) +
+  theme_minimal()
+```
+
+Widzimy zatem, że najniższe średnie oceny są od osób, które wydały najmniej (czyli posiadających członkostwo `Bronze`). Zaś najwyższe oceny są od osób, które wydały najwięcej i posiadają członkostwo `Silver`. Na ocenę zdecydowanie wpłynęła tutaj wielkość wydatków i status również. Jednak jak już wcześniej stwierdziliśmy, status `Silver` wydaje się być "lepszy" pod pewnymi względami niż status `Gold`, stąd też średnie oceny z tej grupy są najwyższe.
+
+# Podsumowanie
+* Zróżnicowanie demograficzne miast:
+Miasta są zróżnicowane demograficznie, szczególnie pod względem struktury wiekowej i płciowej klientów.
+Pojawiają się preferencje zakupowe związane z płcią i wiekiem w poszczególnych miastach.
+
+* Zależności między miastami a wydatkami:
+Klienci z San Francisco i Nowego Jorku wydają najwięcej, podczas gdy klienci z Houston i Chicago wydają najmniej.
+Różnice te mogą być związane z poziomem życia, dochodami lub innymi czynnikami specyficznymi dla danego obszaru.
+
+* Podział członkostwa ze względu na miasto:
+Pojawił się zdecydowany podział rodzajów członkostwa w zależności od miasta.
+Zaskakujący wynik: Członkostwo Silver(które daje mniejsze korzyści niż Gold) dominuje w miastach San Francisco i Nowym Jorku, pomimo że te miasta generują najwięcej wydatków.
+
+* Różnice w wydatkach w zależności od członkostwa:
+Zidentyfikowano różnice w rozkładzie wydatków w zależności od rodzaju członkostwa.
+Osoby posiadające członkostwo Bronze wydają najmniej, a korzystanie z zniżki ma wpływ na ich wydatki.
+Członkostwo Silver generuje wyższe średnie wydatki niż członkostwo Gold, co może wynikać z korzyści i niższej ceny członkostwa.
+
+* Analiza satysfakcji klientów:
+Zidentyfikowano zróżnicowanie w poziomie satysfakcji w zależności od rodzaju członkostwa.
+Członkostwo Silver przeważa pod względem zadowolenia, podczas gdy członkostwo Gold ma niższy poziom zadowolenia, co może być zaskakujące, biorąc pod uwagę większe korzyści.
+
+* Czas od ostatniego zamówienia:
+Osoby posiadające członkostwo Silver dokonują szybszych kolejnych zamówień, co może wynikać z ich ogólnego zadowolenia z usług.
+Czas od ostatniego zamówienia w grupie Bronze ma rozkład dwumodalny, co wymaga dalszej analizy.
+
+* Wpływ satysfakcji na średnią ocenę
+Osoby, które są niezadowolone z usług lub neutralne mają zdecydowanie niższą średnią ocenę. Jednak osoby, które są neutralne, mają bardziej zróżnicowane oceny.
+
+* Wpływ wydatków na średnią ocenę:
+Wyższe wydatki korelują z wyższymi ocenami.
+Posiadacze członkostwa Silver, mimo wyższych wydatków, wydają się być bardziej zadowoleni z produktów niż posiadacze członkostwa Gold.
+
+# Konkluzje
+* Firma może skupić się na grupie klientów z miast San Francisco i New York, aby jeszcze bardziej zwiększyć zyski. Może dostosować swoje produkty, usługi lub marketing do ich struktury płciowej i wiekowej. Jednak nie ma tutaj takiej konieczności, poniważ klienci z tej grupy są usatysfakcjonowani i zadowoleni z produktów. Także stosunkowo szybko dokonują kolejnych zakupów.
+* Warte uwagi firmy jest na pewno ponowne przemyślenie strategii dla członkostwa Gold. Nie generuje ona przewidywanych największych zysków, a zadowolenie z niej jest niewielkie, pomimo że daje ona największe korzyści i powinna być najbardziej atrakcyjna. Warto zauważyć, że są to głównie mężczyźni, więc może należało by dostosować pod nich benefity. Brak działania w tej kwestii może skutkować utratą klientów.
+* Grupa osób o statusie członkostwa Bronze przynosi najmniejsze zyski i generuje najniższe średnie oceny. Co może skutkować obniżeniem reputacji firmy, a także utratą klientów. Na wielkość wydatków tej grupy najbardziej wpływają zniżki. Są to też głównie kobiety z Houston i Chicago. Można by więc udoskonalić to członkostwo skupiając się na tych czynnikach.
+
+
+
+
+
+
